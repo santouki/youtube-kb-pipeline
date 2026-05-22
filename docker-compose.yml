@@ -1,0 +1,17 @@
+services:
+  pipeline:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./databases:/data/databases   # persists all database output
+      - ./.env:/app/.env              # your ANTHROPIC_API_KEY
+    environment:
+      - DATABASES_DIR=/data/databases
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
