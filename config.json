@@ -1,0 +1,18 @@
+{
+  "channel_url": "PASTE_CHANNEL_URL_HERE",
+  "channel_name": "My Channel",
+  "folder_name": "mychannelname-kb",
+
+  "months": 12,
+  "filter_keywords": [],
+
+  "extract_model": "claude-haiku-4-5-20251001",
+
+  "extract_fields": {
+    "summary": "One-sentence summary of what this video is about",
+    "main_topic": "Primary topic or theme",
+    "key_lessons": "Top 3 key lessons or takeaways as a list of strings",
+    "tools_mentioned": "Tools, software, platforms, or frameworks mentioned as a list",
+    "target_audience": "Who this content is aimed at"
+  }
+}

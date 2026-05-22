@@ -1,0 +1,8 @@
+.env
+*.log
+*-kb/
+*/database.json
+*/database.csv
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,177 @@
+YOUTUBE CHANNEL KNOWLEDGE BASE PIPELINE — FEATURE REFERENCE
+============================================================
+Location: ~/youtube-kb-pipeline/
+Last updated: 2026-05-21
+
+
+WHAT IT DOES
+------------
+A two-script Python pipeline that:
+1. Fetches a list of videos from any YouTube channel or playlist
+2. Filters them by duration, date range, and/or title keywords
+3. Downloads their transcripts (English, trimmed to 12,000 characters)
+4. Sends each transcript to the Claude API to extract structured fields you define
+5. Saves results incrementally to database.json and database.csv
+6. Provides a chat interface to query all extracted data via Claude
+
+It is designed for building domain-specific knowledge bases from YouTube content —
+for example, extracting techniques, instructors, concepts, and key details from
+Brazilian Jiu-Jitsu instructional or competition videos.
+
+
+FILES
+-----
+pipeline.py       Main pipeline: fetch → filter → transcribe → extract → save
+chat.py           Interactive chat interface that queries the built database
+config.json       User configuration (channel URL, fields to extract, filters)
+requirements.txt  Python dependencies
+.env              Contains ANTHROPIC_API_KEY (not committed)
+
+
+CONFIGURATION (config.json)
+---------------------------
+All run parameters live in config.json. Fields:
+
+  channel_url       (string)  Full YouTube channel or playlist URL to scrape
+  channel_name      (string)  Human-readable name, used in chat system prompt
+  folder_name       (string)  Output directory where database files are written
+  months            (int)     How far back to fetch videos (default: 12)
+  filter_keywords   (list)    Title keyword filters — any match passes the video
+                              Example: ["guard", "sweep", "back take"]
+                              Empty list = no keyword filter
+  extract_model     (string)  Claude model for extraction (default: claude-haiku-4-5-20251001)
+  extract_fields    (dict)    The structured fields to extract per video.
+                              Keys are field names in the output database.
+                              Values are plain-English descriptions for Claude.
+                              Example for BJJ:
+                              {
+                                "techniques": "List of BJJ techniques demonstrated or explained",
+                                "position": "Primary position or guard covered (e.g. closed guard, back)",
+                                "instructor": "Name of the instructor or main person in the video",
+                                "skill_level": "Target skill level: beginner, intermediate, advanced",
+                                "key_concepts": "Core concepts or principles taught",
+                                "gi_or_nogi": "Whether the content is gi, no-gi, or both"
+                              }
+
+
+PIPELINE SCRIPT (pipeline.py)
+------------------------------
+Entry point: python pipeline.py [options]
+
+Command-line flags:
+  --config FILE         Path to config file (default: config.json)
+  --max N               Process at most N videos — useful for test runs
+  --skip-existing       Skip video IDs already present in database.json (resume mode)
+  --filter KEYWORD      Case-insensitive keyword filter on titles (overrides config filter_keywords)
+  --months N            Only fetch videos from the last N months (overrides config)
+  --cookies FILE        Path to a Netscape-format cookies.txt file for YouTube auth
+
+Behavior:
+  1. Calls yt-dlp --flat-playlist --dump-json on the channel URL to get all video metadata
+  2. Filters out videos under 10 minutes (hardcoded — skips shorts, trailers, clips)
+  3. Applies date filter: only videos uploaded within the last N months
+  4. Applies keyword filter: title must contain at least one of filter_keywords (if any set)
+  5. Prints the full matched video list (index, title, upload date, duration) and asks y/n
+  6. On confirmation, iterates through videos:
+     a. Fetches transcript via youtube_transcript_api (English)
+     b. On 429 rate-limit error, falls back to yt-dlp --cookies-from-browser chrome
+     c. Trims transcript to 12,000 characters
+     d. Sends transcript to Claude with a prompt listing the extract_fields
+     e. Parses Claude's JSON response
+     f. Appends entry to database and writes both database.json and database.csv
+     g. Waits 1.5 seconds before the next Claude API call
+  7. All output is logged to console AND to {folder_name}/pipeline.log
+
+Database entry schema (per video):
+  video_id        YouTube video ID (e.g. "dQw4w9WgXcQ")
+  title           Video title
+  url             Full YouTube watch URL
+  upload_date     Upload date as YYYYMMDD string
+  duration_secs   Video duration in seconds
+  + all fields defined in extract_fields (values are strings, numbers, or lists)
+
+
+CHAT SCRIPT (chat.py)
+----------------------
+Entry point: python chat.py [options]
+
+Command-line flags:
+  --config FILE     Path to config file (default: config.json)
+  --model MODEL     Claude model to use (default: claude-sonnet-4-6)
+
+Behavior:
+  - Loads database.json from the configured folder
+  - Builds a system prompt containing the full database as JSON
+  - Starts a multi-turn conversation loop in the terminal
+  - Each question is sent to Claude with the full database as context
+  - Claude can answer questions about patterns, specific videos, comparisons, etc.
+  - Maintains conversation history within the session (not persisted to disk)
+  - Type "quit" or Ctrl+C to exit
+
+
+OUTPUT FILES (written to folder_name/)
+--------------------------------------
+database.json     Array of video entry objects; append-safe, human-readable
+database.csv      Flat CSV version; nested lists/dicts are JSON-stringified in cells
+pipeline.log      Full timestamped log of each pipeline run
+
+
+DEPENDENCIES
+------------
+  anthropic              Claude API client (>=0.40.0)
+  python-dotenv          Loads ANTHROPIC_API_KEY from .env
+  youtube-transcript-api Fetches transcripts from YouTube (v1.x API)
+  yt-dlp                 Fetches video metadata and subtitle fallback
+
+System requirement: yt-dlp must be installed and available in PATH (brew install yt-dlp)
+
+
+EXAMPLE: BJJ KNOWLEDGE BASE RUN
+---------------------------------
+config.json:
+  {
+    "channel_url": "https://www.youtube.com/@BJJChannel/videos",
+    "channel_name": "BJJ Channel",
+    "folder_name": "bjj-kb",
+    "months": 24,
+    "filter_keywords": [],
+    "extract_model": "claude-haiku-4-5-20251001",
+    "extract_fields": {
+      "techniques": "List of BJJ techniques demonstrated or explained",
+      "position": "Primary position or guard covered (e.g. closed guard, half guard, back)",
+      "instructor": "Name of the instructor or main person in the video",
+      "skill_level": "Target skill level: beginner, intermediate, or advanced",
+      "key_concepts": "Core principles or concepts taught",
+      "gi_or_nogi": "Whether content is gi, no-gi, or both",
+      "submission_entries": "Any submission setups or finishes shown"
+    }
+  }
+
+Run:
+  python pipeline.py --skip-existing
+  # → shows matched video list with titles, dates, durations
+  # → asks y/n before starting
+  # → saves to bjj-kb/database.json and bjj-kb/database.csv
+
+Test first:
+  python pipeline.py --max 3
+  # → processes only the first 3 matched videos
+
+Filter to a specific topic:
+  python pipeline.py --filter "leg lock" --months 12
+
+Chat:
+  python chat.py
+  # → "What techniques appear most across all videos?"
+  # → "Which videos cover the back take from turtle position?"
+  # → "Summarize all no-gi content"
+
+
+INTEGRATION NOTES
+-----------------
+- The database.json is a plain JSON array and can be read by any other system
+- Each video's extracted fields are top-level keys in the entry object (not nested)
+- The pipeline is idempotent when run with --skip-existing
+- Extract fields can be changed between runs — new fields will appear on new entries only
+- The pipeline does not re-process videos already in the database unless you delete the entry
+- database.csv can be imported directly into spreadsheets or pandas for analysis
